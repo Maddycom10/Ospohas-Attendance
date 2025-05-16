@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OSPOHAS Attendance Tracker </title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen p-6 font-sans">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+    <section>
+    <h1 class="text-4xl font-bold mb-2 text-indigo-600"><center>OSPOHAS Attendance Tracking System</h1>
+    </section>
+    <section class="bg-white p-6 rounded shadow-md">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700">Department Information</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <input id="departmentInput" type="text" placeholder="Department" class="border border-gray-300 rounded p-2" oninput="updateDepartmentInfo()" />
+        <input id="hocInput" type="text" placeholder="HOC" class="border border-gray-300 rounded p-2" oninput="updateDepartmentInfo()" />
+        <input id="levelInput" type="text" placeholder="Level" class="border border-gray-300 rounded p-2" oninput="updateDepartmentInfo()" />
+      </div>
+    </section>
+
+    <section class="bg-white p-6 rounded shadow-md space-y-4">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700">Add Course</h2>
+      <div class="flex space-x-2">
+        <input id="newCourseInput" type="text" placeholder="Course name" class="flex-grow border border-gray-300 rounded p-2" />
+        <button onclick="addCourse()" class="bg-indigo-600 text-white px-4 rounded hover:bg-indigo-700">Add Course</button>
+      </div>
+    </section>
+
+    <section class="bg-white p-6 rounded shadow-md space-y-4">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700">Add Student</h2>
+      <div class="flex space-x-2">
+        <input id="newStudentInput" type="text" placeholder="Student name" class="flex-grow border border-gray-300 rounded p-2" />
+        <button onclick="addStudent()" class="bg-indigo-600 text-white px-4 rounded hover:bg-indigo-700">Add Student</button>
+      </div>
+    </section>
+
+    <section class="bg-white p-6 rounded shadow-md space-y-4">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700">Add Carry Over Student</h2>
+      <div class="flex space-x-2">
+        <input id="carryOverStudentInput" type="text" placeholder="Student name" class="flex-grow border border-gray-300 rounded p-2" />
+        <select id="carryOverCourseSelect" class="border border-gray-300 rounded p-2 w-40"></select>
+        <button onclick="addCarryOver()" class="bg-indigo-600 text-white px-4 rounded hover:bg-indigo-700">Add Carry Over</button>
+      </div>
+      <p class="text-sm text-gray-600 italic">Carry over students will be automatically enrolled when their course is added.</p>
+    </section>
+
+    <section class="bg-white p-6 rounded shadow-md space-y-4">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700">Attendance</h2>
+      <div class="flex items-center space-x-4 mb-2">
+        <select id="attendanceCourseSelect" class="border border-gray-300 rounded p-2 w-56" onchange="renderAttendanceTable()"></select>
+        <button onclick="addSession()" class="bg-green-600 text-white px-3 rounded hover:bg-green-700">Add Session</button>
+        <button onclick="generatePDF()" class="bg-indigo-600 text-white px-3 rounded hover:bg-indigo-700">Generate PDF</button>
+        <button onclick="clearData()" class="bg-red-600 text-white px-3 rounded hover:bg-red-700">Clear All</button>
+      </div>
+      <div id="attendanceTableContainer" class="overflow-auto max-h-96 border border-gray-300 rounded bg-white p-2"></div>
+    </section>
+
+  </div>
+<div>
+<section>
+<center class="text-xl font-bold mb-4 text-indigo-700" > <P> Copyright@OSIGWE_CHRISTOPHER_SEWANU {2025}
+
+</section></div>
+<script>
+  const STORAGE_KEY = 'attendanceTrackerData';
+
+  let data = {
+    departmentInfo: { department: '', hoc: '', level: '' },
+    courses: [],
+    students: [],
+    carryOver: [], // {studentName, courseName}
+    attendance: {}, // {courseName: {studentName: [status]}}
+    sessionNames: {} // {courseName: [sessionName]}
+  };
+
+  function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function loadData() {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      data = JSON.parse(stored);
+      document.getElementById('departmentInput').value = data.departmentInfo.department || '';
+      document.getElementById('hocInput').value = data.departmentInfo.hoc || '';
+      document.getElementById('levelInput').value = data.departmentInfo.level || '';
+    }
+  }
+
+  function updateDepartmentInfo() {
+    data.departmentInfo.department = document.getElementById('departmentInput').value.trim();
+    data.departmentInfo.hoc = document.getElementById('hocInput').value.trim();
+    data.departmentInfo.level = document.getElementById('levelInput').value.trim();
+    saveData();
+  }
+
+  function addCourse() {
+    const courseInput = document.getElementById('newCourseInput');
+    const courseName = courseInput.value.trim();
+    if (!courseName) {
+      alert('Please enter a course name');
+      return;
+    }
+    if (data.courses.includes(courseName)) {
+      alert('Course already exists');
+      return;
+    }
+
+    // Add the course
+    data.courses.push(courseName);
+    data.attendance[courseName] = data.attendance[courseName] || {};
+    data.sessionNames[courseName] = data.sessionNames[courseName] || [];
+
+    // Enroll carry over students for this course
+    const carryOvers = data.carryOver.filter(co => co.courseName === courseName);
+    carryOvers.forEach(co => {
+      if (!data.students.find(s => s.name === co.studentName)) {
+        // Add carry over student if not present in student list
+        data.students.push({name: co.studentName, courses: [courseName]});
+      } else {
+        // If student exists but not enrolled in this course, add course
+        const s = data.students.find(st => st.name === co.studentName);
+        if (!s.courses.includes(courseName)) s.courses.push(courseName);
+      }
+      if (!data.attendance[courseName][co.studentName]) data.attendance[courseName][co.studentName] = [];
+    });
+
+    // Add course to all existing students if not already enrolled
+    data.students.forEach(s => {
+      if (!s.courses.includes(courseName)) {
+        s.courses.push(courseName);
+      }
+      if (!data.attendance[courseName][s.name]) {
+        data.attendance[courseName][s.name] = [];
+      }
+    });
+
+    courseInput.value = '';
+    refreshCourseSelectors();
+    saveData();
+    renderAttendanceTable();
+  }
+
+  function addStudent() {
+    const studentInput = document.getElementById('newStudentInput');
+    const studentName = studentInput.value.trim();
+    if (!studentName) {
+      alert('Please enter a student name');
+      return;
+    }
+    if (data.students.find(s => s.name === studentName)) {
+      alert('Student already exists');
+      return;
+    }
+    // Enroll student in all courses
+    const newStudent = {name: studentName, courses: [...data.courses]};
+    data.students.push(newStudent);
+    data.courses.forEach(course => {
+      if (!data.attendance[course]) data.attendance[course] = {};
+      if (!data.attendance[course][studentName]) data.attendance[course][studentName] = [];
+    });
+
+    studentInput.value = '';
+    saveData();
+    renderAttendanceTable();
+  }
+
+  function addCarryOver() {
+    const carryOverStudentInput = document.getElementById('carryOverStudentInput');
+    const carryOverCourseSelect = document.getElementById('carryOverCourseSelect');
+    const studentName = carryOverStudentInput.value.trim();
+    const courseName = carryOverCourseSelect.value;
+
+    if (!studentName || !courseName) {
+      alert('Please enter student name and select a course');
+      return;
+    }
+
+    // Add carry over record if not existing
+    if (!data.carryOver.find(co => co.studentName === studentName && co.courseName === courseName)) {
+      data.carryOver.push({studentName, courseName});
+    }
+
+    carryOverStudentInput.value = '';
+    saveData();
+    alert(`Carry over student "${studentName}" added for course "${courseName}". Will be enrolled once course is created.`);
+  }
+
+  function refreshCourseSelectors() {
+    const attendanceSelect = document.getElementById('attendanceCourseSelect');
+    const carryOverSelect = document.getElementById('carryOverCourseSelect');
+    setSelectOptions(attendanceSelect, data.courses);
+    setSelectOptions(carryOverSelect, data.courses);
+  }
+
+  function setSelectOptions(selectElem, options) {
+    selectElem.innerHTML = '';
+    if (options.length === 0) {
+      selectElem.innerHTML = '<option disabled>No courses available</option>';
+      return;
+    }
+    options.forEach(opt => {
+      const optionEl = document.createElement('option');
+      optionEl.value = opt;
+      optionEl.textContent = opt;
+      selectElem.appendChild(optionEl);
+    });
+  }
+
+  function renderAttendanceTable() {
+    const container = document.getElementById('attendanceTableContainer');
+    const courseSelect = document.getElementById('attendanceCourseSelect');
+    const courseName = courseSelect.value;
+    if (!courseName) {
+      container.innerHTML = '<p class="text-gray-600 italic">Please add and select a course to mark attendance.</p>';
+      return;
+    }
+
+    const studentsInCourse = data.students.filter(s => s.courses.includes(courseName));
+    const attendanceRecords = data.attendance[courseName] || {};
+    const sessionNames = data.sessionNames[courseName] || [];
+
+    let maxSessions = 0;
+    studentsInCourse.forEach(student => {
+      const att = attendanceRecords[student.name] || [];
+      if (att.length > maxSessions) maxSessions = att.length;
+    });
+    while (sessionNames.length < maxSessions) sessionNames.push(null);
+
+    // Build table html
+    let html = `<table class="min-w-full border border-gray-300 rounded overflow-hidden">`;
+    html += `<thead class="bg-indigo-100 sticky top-0 z-20"><tr>`;
+    html += `<th class="border border-gray-300 px-3 py-2 sticky left-0 bg-indigo-200 z-30 text-left">Student</th>`;
+    for (let i = 0; i < maxSessions; i++) {
+      const sessionLabel = sessionNames[i] || `Session ${i + 1}`;
+      html += `<th class="border border-gray-300 px-3 py-2 text-center relative">`;
+      html += `<input type="text" maxlength="20" value="${sessionLabel}" class="w-full text-center bg-indigo-50 border border-indigo-300 rounded py-1 px-2 font-semibold text-indigo-700 cursor-pointer"
+      onchange="renameSession('${courseName}', ${i}, this.value)" />`;
+      html += `</th>`;
+    }
+    html += `<th class="border border-gray-300 px-3 py-2"> </th>`;
+    html += `</tr></thead><tbody>`;
+
+    for (const student of studentsInCourse) {
+      html += `<tr class="hover:bg-indigo-50 cursor-default">`;
+      html += `<td class="border border-gray-300 px-3 py-2 sticky left-0 bg-white z-10">${student.name}</td>`;
+      const attendanceArr = attendanceRecords[student.name] || [];
+      for (let i = 0; i < maxSessions; i++) {
+        const status = attendanceArr[i] || '';
+        let bgClass = 'bg-gray-100';
+        if (status === 'P') bgClass = 'bg-green-200';
+        else if (status === 'A') bgClass = 'bg-red-200';
+
+        html += `<td
+          class="border border-gray-300 text-center px-3 py-2 cursor-pointer select-none ${bgClass}"
+          onclick="toggleAttendance('${courseName}', '${student.name}', ${i})"
+          title="Click to toggle attendance for ${student.name}, ${sessionNames[i] || 'Session ' + (i+1)}"
+          >${status}</td>`;
+      }
+      html += `<td></td>`;
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+
+    container.innerHTML = html;
+  }
+
+  function addSession() {
+    const courseSelect = document.getElementById('attendanceCourseSelect');
+    const courseName = courseSelect.value;
+    if (!courseName) {
+      alert('Please select a course to add session');
+      return;
+    }
+    if (!data.sessionNames[courseName]) data.sessionNames[courseName] = [];
+    data.sessionNames[courseName].push(null);
+
+    // Add empty attendance slot for all enrolled students
+    const studentsInCourse = data.students.filter(s => s.courses.includes(courseName));
+    studentsInCourse.forEach(s => {
+      if (!data.attendance[courseName][s.name]) data.attendance[courseName][s.name] = [];
+      data.attendance[courseName][s.name].push('');
+    });
+    saveData();
+    renderAttendanceTable();
+  }
+
+  function toggleAttendance(courseName, studentName, sessionIndex) {
+    if (!data.attendance[courseName]) data.attendance[courseName] = {};
+    if (!data.attendance[courseName][studentName]) data.attendance[courseName][studentName] = [];
+
+    let arr = data.attendance[courseName][studentName];
+    if (arr.length <= sessionIndex) {
+      for (let i = arr.length; i <= sessionIndex; i++) arr[i] = '';
+    }
+
+    const current = arr[sessionIndex];
+    const next = current === '' ? 'P' : current === 'P' ? 'A' : '';
+    arr[sessionIndex] = next;
+    saveData();
+    renderAttendanceTable();
+  }
+
+  function renameSession(courseName, sessionIndex, newName) {
+    if (!newName) {
+      newName = null;
+    }
+    if (!data.sessionNames[courseName]) data.sessionNames[courseName] = [];
+    data.sessionNames[courseName][sessionIndex] = newName;
+    saveData();
+    renderAttendanceTable();
+  }
+
+  function clearData() {
+    if (confirm('Are you sure you want to clear all data?')) {
+      data = {
+        departmentInfo: { department: '', hoc: '', level: '' },
+        courses: [],
+        students: [],
+        carryOver: [],
+        attendance: {},
+        sessionNames: {}
+      };
+      saveData();
+      document.getElementById('departmentInput').value = '';
+      document.getElementById('hocInput').value = '';
+      document.getElementById('levelInput').value = '';
+      refreshCourseSelectors();
+      renderAttendanceTable();
+    }
+  }
+
+  function generatePDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    let y = 10;
+
+    // Print Department Info
+    doc.setFontSize(20);
+    doc.setTextColor(30, 30, 70);
+    doc.text(data.departmentInfo.department || 'Department: N/A', 105, y, null, null, 'center');
+    y += 10;
+    doc.setFontSize(14);
+    doc.setTextColor(20, 20, 50);
+    doc.text(`HOC: ${data.departmentInfo.hoc || 'N/A'}`, 105, y, null, null, 'center');
+    y += 8;
+    doc.text(`Level: ${data.departmentInfo.level || 'N/A'}`, 105, y, null, null, 'center');
+    y += 15;
+
+    doc.setFontSize(18);
+    doc.setTextColor(50, 50, 110);
+    doc.text('Attendance Report', 105, y, null, null, 'center');
+    y += 10;
+
+    if (data.courses.length === 0) {
+      doc.setFontSize(14);
+      doc.setTextColor(150, 0, 0);
+      doc.text('No courses available.', 105, y, null, null, 'center');
+      y += 10;
+    }
+
+    data.courses.forEach(course => {
+      doc.setFontSize(14);
+      y += 8;
+      doc.setTextColor(40, 40, 90);
+      doc.text(`Course: ${course}`, 10, y);
+
+      const studentsInCourse = data.students.filter(s => s.courses.includes(course));
+      const attendanceRecords = data.attendance[course] || {};
+
+      y += 6;
+
+      // Table header
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Student', 10, y);
+      doc.text('Total Present', 90, y);
+      doc.text('Total Absent', 140, y);
+      y += 6;
+
+      // Students rows
+      studentsInCourse.forEach(student => {
+        if (y > 270) {
+          doc.addPage();
+          y = 10;
+        }
+        doc.text(student.name, 10, y);
+        const attArr = attendanceRecords[student.name] || [];
+        let pres = 0, abs = 0;
+        attArr.forEach(val => {
+          if (val === 'P') pres++;
+          else if (val === 'A') abs++;
+        });
+        doc.text(pres.toString(), 90, y);
+        doc.text(abs.toString(), 140, y);
+        y += 6;
+      });
+    });
+
+    doc.save('attendance-report.pdf');
+  }
+
+  // Initialize
+  loadData();
+  refreshCourseSelectors();
+  renderAttendanceTable();
+</script>
+
+</body>
+</html>
